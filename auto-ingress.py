@@ -101,8 +101,9 @@ def auto_ingress(
             click.echo('un-automated ingress already exists, ignoring')
             continue
           if existing_ingress.metadata.annotations[annotation_key] == ingress:
-            click.echo('automated ingress already exists, ignoring')
-            continue
+            if existing_ingress.spec.rules[0].http.paths[0].backend.service_port == port:
+              click.echo('automated ingress already exists, ignoring')
+              continue
           click.echo('updating %s => %s' % (ingress, str(port)))
         else:
           click.echo('creating %s => %s' % (ingress, str(port)))
