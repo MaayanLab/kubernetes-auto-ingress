@@ -39,13 +39,13 @@ def endless_watch(*args):
   '--additional-ingress-annotations',
   envvar='ADDITIONAL_INGRESS_ANNOTATIONS',
   default='{ "cert-manager.io/issuer": "letsencrypt-prod", "kubernetes.io/tls-acme": "true" }',
-  help='Annotation key to watch for',
+  help='Additional ingress annotations (JSON)',
   show_default=True,
 )
 @click.option(
   '--kube-config',
-  envvar='ADDITIONAL_INGRESS_ANNOTATIONS',
-  help='Annotation key to watch for',
+  envvar='KUBECONFIG',
+  help='Use kubeconfig instead of incluster config',
   is_flag=True,
 )
 def auto_ingress(
