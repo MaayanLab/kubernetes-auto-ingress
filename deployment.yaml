@@ -1,21 +1,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: auto-ingress
+  name: kubernetes-auto-ingress
   namespace: kube-system
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: auto-ingress
+      app: kubernetes-auto-ingress
   template:
     metadata:
       labels:
-        app: auto-ingress
+        app: kubernetes-auto-ingress
     spec:
       containers:
-      - name: auto-ingress
-        image: maayanlab/auto-ingress:latest
+      - name: kubernetes-auto-ingress
+        image: maayanlab/kubernetes-auto-ingress:latest
         imagePullPolicy: Always
         tty: true
       restartPolicy: Always
