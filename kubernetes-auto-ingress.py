@@ -38,7 +38,7 @@ def endless_watch(*args):
 @click.option(
   '--additional-ingress-annotations',
   envvar='ADDITIONAL_INGRESS_ANNOTATIONS',
-  default='{ "cert-manager.io/issuer": "letsencrypt-prod", "kubernetes.io/tls-acme": "true" }',
+  default='{ "cert-manager.io/cluster-issuer": "letsencrypt-prod", "kubernetes.io/tls-acme": "true" }',
   help='Additional ingress annotations (JSON)',
   show_default=True,
 )
