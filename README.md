@@ -27,15 +27,6 @@ This registers an annotation with the same key-value pair, and uses it to determ
 
 ## Installation
 
-### Pre-install RBAC setup
-Setup service account for cluster
-```bash
-kubectl create serviceaccount --namespace kube-system tiller
-kubectl create clusterrolebinding tiller-cluster-rule --clusterrole=cluster-admin --serviceaccount=kube-system:tiller
-```
-
-If you change the service account name, you'll need to modify the deployment. tiller is probably already there if you use helm.
-
 ### Install
 ```bash
 kubectl create -f https://raw.githubusercontent.com/MaayanLab/kubernetes-auto-ingress/master/deployment.yaml
@@ -45,10 +36,10 @@ kubectl create -f https://raw.githubusercontent.com/MaayanLab/kubernetes-auto-in
 
 ### Build
 ```bash
-docker build -t maayanlab/auto-ingress:latest .
+docker build -t maayanlab/kubernetes-auto-ingress:latest .
 ```
 
 ### Publish
 ```bash
-docker push maayanlab/auto-ingress:latest
+docker push maayanlab/kubernetes-auto-ingress:latest
 ```
