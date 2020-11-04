@@ -36,8 +36,15 @@ def endless_watch(*args):
   show_default=True,
 )
 @click.option(
-  '--additional-ingress-annotations',
-  envvar='ADDITIONAL_INGRESS_ANNOTATIONS',
+  '--additional-ingress-annotations-http',
+  envvar='ADDITIONAL_INGRESS_ANNOTATIONS_HTTP',
+  default='{ "nginx.ingress.kubernetes.io/ssl-redirect": "false" }',
+  help='Additional ingress annotations (JSON)',
+  show_default=True,
+)
+@click.option(
+  '--additional-ingress-annotations-https',
+  envvar='ADDITIONAL_INGRESS_ANNOTATIONS_HTTPS',
   default='{ "cert-manager.io/cluster-issuer": "letsencrypt-prod", "kubernetes.io/tls-acme": "true" }',
   help='Additional ingress annotations (JSON)',
   show_default=True,
@@ -51,7 +58,8 @@ def endless_watch(*args):
 def auto_ingress(
   namespace,
   annotation_key,
-  additional_ingress_annotations,
+  additional_ingress_annotations_http,
+  additional_ingress_annotations_https,
   kube_config,
 ):
   click.echo('Loading config...')
@@ -60,7 +68,8 @@ def auto_ingress(
   else:
     config.load_incluster_config()
 
-  additional_ingress_annotations = json.loads(additional_ingress_annotations)
+  additional_ingress_annotations_http = json.loads(additional_ingress_annotations_http)
+  additional_ingress_annotations_https = json.loads(additional_ingress_annotations_https)
   apps_v1 = client.AppsV1Api()
   networking_v1_beta1 = client.NetworkingV1beta1Api()
 
@@ -126,7 +135,12 @@ def auto_ingress(
             ),
           ],
         )
-        if ingress_parsed.scheme == 'https':
+        annotations = {
+          annotation_key: ingress
+        }
+        if ingress_parsed.scheme == 'http':
+          annotations.update(additional_ingress_annotations_http)
+        elif ingress_parsed.scheme == 'https':
           spec.update(
             tls=[
               client.NetworkingV1beta1IngressTLS(
@@ -135,6 +149,8 @@ def auto_ingress(
               ),
             ],
           )
+          annotations.update(additional_ingress_annotations_https)
+        #
         service = dict(
           namespace=namespace,
           body=client.NetworkingV1beta1Ingress(
@@ -142,7 +158,7 @@ def auto_ingress(
             kind='Ingress',
             metadata=client.V1ObjectMeta(
               name=name,
-              annotations=dict(additional_ingress_annotations, **{ annotation_key: ingress }),
+              annotations=annotations,
             ),
             spec=client.NetworkingV1beta1IngressSpec(**spec),
           ),
