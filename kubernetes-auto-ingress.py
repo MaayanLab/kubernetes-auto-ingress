@@ -71,7 +71,7 @@ def auto_ingress(
   additional_ingress_annotations_http = json.loads(additional_ingress_annotations_http)
   additional_ingress_annotations_https = json.loads(additional_ingress_annotations_https)
   apps_v1 = client.AppsV1Api()
-  networking_v1_beta1 = client.NetworkingV1beta1Api()
+  networking_v1 = client.NetworkingV1Api()
 
   click.echo('Starting..')
   if namespace == '*':
@@ -107,7 +107,7 @@ def auto_ingress(
     if event_type in {'ADDED', 'MODIFIED'}:
       click.echo('ensuring %s => %s' % (ingress, str(port)))
       try:
-        existing_ingress = networking_v1_beta1.read_namespaced_ingress(name, namespace)
+        existing_ingress = networking_v1.read_namespaced_ingress(name, namespace)
       except ApiException as e:
         if e.status != 404:
           raise e
@@ -118,7 +118,7 @@ def auto_ingress(
           click.echo('un-automated ingress already exists, ignoring')
           continue
         if existing_ingress.metadata.annotations[annotation_key] == ingress:
-          if existing_ingress.spec.rules[0].http.paths[0].backend.service_port == port:
+          if existing_ingress.spec.rules[0].http.paths[0].backend.service.port.number == port:
             click.echo('automated ingress already exists, ignoring')
             continue
         click.echo('updating %s => %s' % (ingress, str(port)))
@@ -126,16 +126,22 @@ def auto_ingress(
         click.echo('creating %s => %s' % (ingress, str(port)))
       #
       spec = dict(
+        ingress_class_name='nginx',
         rules=[
-          client.NetworkingV1beta1IngressRule(
+          client.V1IngressRule(
             host=ingress_parsed.hostname,
-            http=client.NetworkingV1beta1HTTPIngressRuleValue(
+            http=client.V1HTTPIngressRuleValue(
               paths=[
-                client.NetworkingV1beta1HTTPIngressPath(
+                client.V1HTTPIngressPath(
                   path=ingress_parsed.path,
-                  backend=client.NetworkingV1beta1IngressBackend(
-                    service_name=name,
-                    service_port=port,
+                  path_type='ImplementationSpecific',
+                  backend=client.V1IngressBackend(
+                    service=client.V1IngressServiceBackend(
+                      name=name,
+                      port=client.V1ServiceBackendPort(
+                        number=port,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -151,7 +157,7 @@ def auto_ingress(
       elif ingress_parsed.scheme == 'https':
         spec.update(
           tls=[
-            client.NetworkingV1beta1IngressTLS(
+            client.V1IngressTLS(
               hosts=[ingress_parsed.hostname],
               secret_name=ingress_parsed.hostname.replace('.', '-')+'-tls',
             ),
@@ -161,23 +167,23 @@ def auto_ingress(
       #
       service = dict(
         namespace=namespace,
-        body=client.NetworkingV1beta1Ingress(
-          api_version='networking.k8s.io/v1beta1',
+        body=client.V1Ingress(
+          api_version='networking.k8s.io/v1',
           kind='Ingress',
           metadata=client.V1ObjectMeta(
             name=name,
             annotations=annotations,
           ),
-          spec=client.NetworkingV1beta1IngressSpec(**spec),
+          spec=client.V1IngressSpec(**spec),
         ),
       )
       if existing_ingress is None:
-        networking_v1_beta1.create_namespaced_ingress(**service)
+        networking_v1.create_namespaced_ingress(**service)
       else:
-        networking_v1_beta1.patch_namespaced_ingress(name, namespace, service['body'])
+        networking_v1.patch_namespaced_ingress(name, namespace, service['body'])
     elif event_type == 'DELETED':
       try:
-        existing_ingress = networking_v1_beta1.read_namespaced_ingress(name, namespace)
+        existing_ingress = networking_v1.read_namespaced_ingress(name, namespace)
       except ApiException as e:
         if e.status != 404:
           raise e
@@ -189,7 +195,7 @@ def auto_ingress(
         continue
       #
       try:
-        networking_v1_beta1.delete_namespaced_ingress(name, namespace)
+        networking_v1.delete_namespaced_ingress(name, namespace)
       except ApiException as e:
         if e.status != 404:
           raise e

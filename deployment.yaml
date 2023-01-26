@@ -29,7 +29,6 @@ subjects:
 roleRef:
   kind: ClusterRole
   name: kubernetes-auto-ingress-role
-  namespace: kube-system
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: apps/v1
@@ -49,7 +48,7 @@ spec:
     spec:
       containers:
       - name: kubernetes-auto-ingress
-        image: maayanlab/kubernetes-auto-ingress:latest
+        image: maayanlab/kubernetes-auto-ingress:v1.2.6
         imagePullPolicy: Always
         tty: true
       restartPolicy: Always
