@@ -8,11 +8,10 @@ By default, it watches the default namespace for deployments with the (changable
 
 ```yaml
 metadata:
+  annotations:
+    maayanlab.cloud/ingress: https://example.org/your_path # your path
 spec:
   template:
-    metadata:
-      annotations:
-        maayanlab.cloud/ingress: https://example.org/your_path # your path
     spec:
       containers:
       - image: your_image
