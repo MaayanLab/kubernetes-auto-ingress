@@ -15,10 +15,16 @@ def one(it):
   first = next(iter(it))
   try:
     next(iter(it))
-  except:
+  except StopIteration:
     return first
   else:
     raise MoreThanOneException()
+
+def one_or_none(it):
+  try:
+    return one(it)
+  except StopIteration | MoreThanOneException:
+    return None
 
 def endless_watch(*args):
   w = watch.Watch()
@@ -71,13 +77,13 @@ def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
     service_update_required = True
     service.metadata.annotations[annotation_key] = ingress_url
   # ensure port is up to date
-  port = one(
+  port = one_or_none(
     port.container_port
     for container in deployment.spec.template.spec.containers
     if container.ports
     for port in container.ports
     if port.name == 'http' and port.protocol == 'TCP'
-  ) or one( # fallback criterion -- only one TCP port there
+  ) or one_or_none( # fallback criterion -- only one TCP port there
     port.container_port
     for container in deployment.spec.template.spec.containers
     if container.ports
@@ -216,11 +222,11 @@ def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Se
     server_aliases = set(ingress.metadata.annotations['nginx.ingress.kubernetes.io/server-alias'].split(',')) - {ingress_url_parsed.hostname}
     ingress.spec.tls[0].hosts += list(server_aliases)
   # ensure port is up to date
-  port = one(
+  port = one_or_none(
     service_port.port
     for service_port in service.spec.ports
     if service_port.name == 'http' and service_port.protocol == 'TCP'
-  ) or one( # fallback criterion: only one port there
+  ) or one_or_none( # fallback criterion: only one port there
     service_port.port
     for service_port in service.spec.ports
     if service_port.protocol == 'TCP'
