@@ -119,7 +119,7 @@ def delete_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
     if e.status != 404:
       raise e
 
-def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Service, networking_v1: client.NetworkingV1Api, annotation_key, ingress_url, ingress_url_parsed, additional_ingress_annotations_http, additional_ingress_annotations_https, dry_run: bool):
+def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Service, networking_v1: client.NetworkingV1Api, annotation_key: str, ingress_url: str, ingress_url_parsed: urllib.parse.ParseResult, additional_ingress_annotations_http, additional_ingress_annotations_https, dry_run: bool):
   ingress_update_required = False
   try:
     ingress = networking_v1.read_namespaced_ingress(deployment.metadata.name, deployment.metadata.namespace)
@@ -144,7 +144,6 @@ def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Se
             http=client.V1HTTPIngressRuleValue(
               paths=[
                 client.V1HTTPIngressPath(
-                  path=ingress_url_parsed.path,
                   path_type='ImplementationSpecific',
                   backend=client.V1IngressBackend(
                     service=client.V1IngressServiceBackend(
@@ -161,13 +160,17 @@ def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Se
         ],
       ),
     )
-  if annotation_key not in ingress.metadata.annotations:
+  if annotation_key not in ingress.metadata.annotations or not ingress.metadata.annotations[annotation_key].endswith(ingress.spec.rules[0].http.paths[0].path or ''):
     click.echo(f"found un-managed ingress/{ingress.metadata.name} -n {ingress.metadata.namespace}")
     return ingress
   # update ingress_url if it changed
   if ingress.metadata.annotations[annotation_key] != ingress_url:
     ingress_update_required = True
+    # update the annotation so we know we're in sync
     ingress.metadata.annotations[annotation_key] = ingress_url
+    # update the actual path
+    ingress.spec.rules[0].http.paths[0].path = ingress_url_parsed.path
+    # update the scheme
     if ingress_url_parsed.scheme == 'http':
       # swap http=>https
       for k in additional_ingress_annotations_https:
@@ -231,7 +234,7 @@ def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Se
     click.echo(f"patched ingress/{ingress.metadata.name} -n {ingress.metadata.namespace}")
   return ingress
 
-def delete_managed_ingress(*, deployment: client.V1Deployment, networking_v1: client.NetworkingV1Api, annotation_key: str, dry_run: bool):
+def delete_managed_ingress(*, deployment: client.V1Deployment, networking_v1: client.NetworkingV1Api, annotation_key: str, ingress_url: str, ingress_url_parsed: urllib.parse.ParseResult, dry_run: bool):
   try:
     ingress = networking_v1.read_namespaced_ingress(deployment.metadata.name, deployment.metadata.namespace)
   except ApiException as e:
@@ -239,7 +242,7 @@ def delete_managed_ingress(*, deployment: client.V1Deployment, networking_v1: cl
       raise e
     return
   #
-  if annotation_key not in ingress.metadata.annotations:
+  if annotation_key not in ingress.metadata.annotations or not ingress.metadata.annotations[annotation_key].endswith(ingress.spec.rules[0].http.paths[0].path or ''):
     click.echo(f"ignoring un-managed ingress/{ingress.metadata.name} -n {ingress.metadata.namespace}")
     return
   #
@@ -362,6 +365,8 @@ def auto_ingress(
           deployment=deployment,
           networking_v1=networking_v1,
           annotation_key=annotation_key,
+          ingress_url=ingress_url,
+          ingress_url_parsed=ingress_url_parsed,
           dry_run=dry_run,
         )
         delete_managed_service(
