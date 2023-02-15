@@ -210,6 +210,11 @@ def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Se
         ingress.metadata.annotations[k] = deployment.metadata.annotations[k]
       else:
         ingress.metadata.annotations[k] = None
+  # add server-aliases to tls hosts (will only result in a change if annotations changed or ingress_url changed)
+  if ingress.spec.tls and ingress.metadata.annotations.get('nginx.ingress.kubernetes.io/server-alias'):
+    # we add the unique comma separated aliases except the potentially duplicated primary hostname which is already there
+    server_aliases = set(ingress.metadata.annotations['nginx.ingress.kubernetes.io/server-alias'].split(',')) - {ingress_url_parsed.hostname}
+    ingress.spec.tls[0].hosts += list(server_aliases)
   # ensure port is up to date
   port = one(
     service_port.port
