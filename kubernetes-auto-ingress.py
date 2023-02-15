@@ -77,6 +77,12 @@ def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
     if container.ports
     for port in container.ports
     if port.name == 'http' and port.protocol == 'TCP'
+  ) or one( # fallback criterion -- only one TCP port there
+    port.container_port
+    for container in deployment.spec.template.spec.containers
+    if container.ports
+    for port in container.ports
+    if port.protocol == 'TCP'
   )
   assert port is not None
   if service.spec.ports[0].target_port != port:
@@ -206,6 +212,10 @@ def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Se
     service_port.port
     for service_port in service.spec.ports
     if service_port.name == 'http' and service_port.protocol == 'TCP'
+  ) or one( # fallback criterion: only one port there
+    service_port.port
+    for service_port in service.spec.ports
+    if service_port.protocol == 'TCP'
   )
   if ingress.spec.rules[0].http.paths[0].backend.service.port.number != port:
     ingress_update_required = True
