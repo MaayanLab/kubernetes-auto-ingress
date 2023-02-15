@@ -4,6 +4,8 @@ metadata:
   name: {{ template "kubernetes-auto-ingress.fullname" . }}
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: {{ template "kubernetes-auto-ingress.fullname" . }}
