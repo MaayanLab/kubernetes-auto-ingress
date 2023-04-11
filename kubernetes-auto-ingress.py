@@ -23,7 +23,9 @@ def one(it):
 def one_or_none(it):
   try:
     return one(it)
-  except StopIteration | MoreThanOneException:
+  except StopIteration:
+    return None
+  except MoreThanOneException:
     return None
 
 def endless_watch(*args):
