@@ -127,7 +127,7 @@ def delete_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
     if e.status != 404:
       raise e
 
-def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Service, networking_v1: client.NetworkingV1Api, annotation_key: str, ingress_url: str, ingress_url_parsed: urllib.parse.ParseResult, additional_ingress_annotations_http, additional_ingress_annotations_https, dry_run: bool):
+def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Service, networking_v1: client.NetworkingV1Api, annotation_key: str, ingress_url: str, ingress_url_parsed: urllib.parse.ParseResult, ingress_class_name: str, additional_ingress_annotations_http, additional_ingress_annotations_https, dry_run: bool):
   ingress_update_required = False
   try:
     ingress = networking_v1.read_namespaced_ingress(deployment.metadata.name, deployment.metadata.namespace)
@@ -145,7 +145,7 @@ def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Se
         annotations={annotation_key: ''},
       ),
       spec=client.V1IngressSpec(
-        ingress_class_name='nginx',
+        ingress_class_name=ingress_class_name,
         rules=[
           client.V1IngressRule(
             host=ingress_url_parsed.hostname,
@@ -285,6 +285,13 @@ def delete_managed_ingress(*, deployment: client.V1Deployment, networking_v1: cl
   show_default=True,
 )
 @click.option(
+  '--ingress-class-name',
+  envvar='INGRESS_CLASS_NAME',
+  default='nginx',
+  help='Kubernetes ingress class name',
+  show_default=True,
+)
+@click.option(
   '--additional-ingress-annotations-http',
   envvar='ADDITIONAL_INGRESS_ANNOTATIONS_HTTP',
   default='{ "nginx.ingress.kubernetes.io/ssl-redirect": "false" }',
@@ -313,6 +320,7 @@ def delete_managed_ingress(*, deployment: client.V1Deployment, networking_v1: cl
 def auto_ingress(
   namespace,
   annotation_key,
+  ingress_class_name,
   additional_ingress_annotations_http,
   additional_ingress_annotations_https,
   kube_config,
@@ -369,6 +377,7 @@ def auto_ingress(
           annotation_key=annotation_key,
           ingress_url=ingress_url,
           ingress_url_parsed=ingress_url_parsed,
+          ingress_class_name=ingress_class_name,
           additional_ingress_annotations_http=additional_ingress_annotations_http,
           additional_ingress_annotations_https=additional_ingress_annotations_https,
           dry_run=dry_run,
