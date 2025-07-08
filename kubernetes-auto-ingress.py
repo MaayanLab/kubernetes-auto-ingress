@@ -127,7 +127,7 @@ def delete_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
     if e.status != 404:
       raise e
 
-def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Service, networking_v1: client.NetworkingV1Api, annotation_key: str, ingress_url: str, ingress_url_parsed: urllib.parse.ParseResult, ingress_class_name: str, additional_ingress_annotations_http, additional_ingress_annotations_https, dry_run: bool):
+def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Service, networking_v1: client.NetworkingV1Api, annotation_key: str, ingress_url: str, ingress_url_parsed: urllib.parse.ParseResult, ingress_class_name: str, ingress_create_tls: bool, additional_ingress_annotations_http: dict, additional_ingress_annotations_https: dict, dry_run: bool):
   ingress_update_required = False
   try:
     ingress = networking_v1.read_namespaced_ingress(deployment.metadata.name, deployment.metadata.namespace)
@@ -196,12 +196,15 @@ def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Se
       for k, v in additional_ingress_annotations_https.items():
         ingress.metadata.annotations[k] = v
       # add tls
-      ingress.spec.tls = [
-        client.V1IngressTLS(
-          hosts=[ingress_url_parsed.hostname],
-          secret_name=ingress_url_parsed.hostname.replace('.', '-')+'-tls',
-        ),
-      ]
+      if ingress_create_tls:
+        ingress.spec.tls = [
+          client.V1IngressTLS(
+            hosts=[ingress_url_parsed.hostname],
+            secret_name=ingress_url_parsed.hostname.replace('.', '-')+'-tls',
+          ),
+        ]
+      else:
+        ingress.spec.tls = None
   # any ingress-related annotations in the deployment not reflected in the ingress?
   deployment_nginx_annotations = {
     (k, v) for k, v in deployment.metadata.annotations.items()
@@ -222,7 +225,8 @@ def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Se
   if ingress.spec.tls and ingress.metadata.annotations.get('nginx.ingress.kubernetes.io/server-alias'):
     # we add the unique comma separated aliases except the potentially duplicated primary hostname which is already there
     server_aliases = set(ingress.metadata.annotations['nginx.ingress.kubernetes.io/server-alias'].split(',')) - {ingress_url_parsed.hostname}
-    ingress.spec.tls[0].hosts += list(server_aliases)
+    if ingress_create_tls:
+      ingress.spec.tls[0].hosts += list(server_aliases)
   # ensure port is up to date
   port = one_or_none(
     service_port.port
@@ -292,6 +296,13 @@ def delete_managed_ingress(*, deployment: client.V1Deployment, networking_v1: cl
   show_default=True,
 )
 @click.option(
+  '--ingress-create-tls',
+  envvar='INGRESS_CREATE_TLS',
+  default=False,
+  help='Create kubernetes ingress tls/secret (cert-manager)',
+  is_flag=True,
+)
+@click.option(
   '--additional-ingress-annotations-http',
   envvar='ADDITIONAL_INGRESS_ANNOTATIONS_HTTP',
   default='{ "nginx.ingress.kubernetes.io/ssl-redirect": "false" }',
@@ -321,6 +332,7 @@ def auto_ingress(
   namespace,
   annotation_key,
   ingress_class_name,
+  ingress_create_tls,
   additional_ingress_annotations_http,
   additional_ingress_annotations_https,
   kube_config,
@@ -378,6 +390,7 @@ def auto_ingress(
           ingress_url=ingress_url,
           ingress_url_parsed=ingress_url_parsed,
           ingress_class_name=ingress_class_name,
+          ingress_create_tls=ingress_create_tls,
           additional_ingress_annotations_http=additional_ingress_annotations_http,
           additional_ingress_annotations_https=additional_ingress_annotations_https,
           dry_run=dry_run,
