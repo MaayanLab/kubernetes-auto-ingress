@@ -208,11 +208,11 @@ def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Se
   # any ingress-related annotations in the deployment not reflected in the ingress?
   deployment_nginx_annotations = {
     (k, v) for k, v in deployment.metadata.annotations.items()
-    if k.startswith('nginx.ingress')
+    if k.startswith('nginx.ingress.kubernetes.io/') or k.startsiwth('traefik.ingress.kubernetes.io/')
   }
   ingress_nginx_annotations = {
     (k, v) for k, v in ingress.metadata.annotations.items()
-    if k.startswith('nginx.ingress')
+    if k.startswith('nginx.ingress.kubernetes.io/') or k.startsiwth('traefik.ingress.kubernetes.io/')
   }
   if deployment_nginx_annotations ^ ingress_nginx_annotations:
     ingress_update_required = True
