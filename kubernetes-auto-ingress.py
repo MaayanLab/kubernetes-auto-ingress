@@ -4,6 +4,7 @@ import json
 import click
 import urllib.parse
 import traceback
+from concurrent import futures
 from kubernetes import client, config, watch
 from kubernetes.client.exceptions import ApiException
 
@@ -40,7 +41,7 @@ def endless_watch(*args):
     except StopIteration:
       s = iter(w.stream(*args, resource_version=v))
 
-def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.CoreV1Api, annotation_key: str, ingress_url: str, dry_run: bool):
+def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.CoreV1Api, annotation_key: str, ingress_url: str, ingress_url_parsed: urllib.parse.ParseResult, additional_ingress_annotations_http: dict, additional_ingress_annotations_https: dict, dry_run: bool):
   service_update_required = False
   try:
     service = core_v1.read_namespaced_service(deployment.metadata.name, deployment.metadata.namespace)
@@ -72,12 +73,32 @@ def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
       ),
     )
   if annotation_key not in service.metadata.annotations:
-    click.echo(f"found un-managed service/{service.metadata.name} -n {service.metadata.namespace}")
+    click.echo(f"[deploy/{deployment.metadata.name} -n {deployment.metadata.namespace}]: found un-managed service/{service.metadata.name}")
     return service
   # update ingress_url if it changed
   if service.metadata.annotations[annotation_key] != ingress_url:
     service_update_required = True
     service.metadata.annotations[annotation_key] = ingress_url
+  # any ingress-related annotations in the deployment not reflected in the service?
+  deployment_nginx_annotations = {
+    (k, v) for k, v in deployment.metadata.annotations.items()
+    if k.startswith('nginx.ingress.kubernetes.io/') or k.startswith('traefik.ingress.kubernetes.io/')
+  }
+  service_nginx_annotations = {
+    (k, v) for k, v in service.metadata.annotations.items()
+    if k.startswith('nginx.ingress.kubernetes.io/') or k.startswith('traefik.ingress.kubernetes.io/')
+  }
+  if deployment_nginx_annotations ^ service_nginx_annotations:
+    service_update_required = True
+    for k in {k for k, _ in deployment_nginx_annotations ^ service_nginx_annotations}:
+      if k in deployment.metadata.annotations:
+        service.metadata.annotations[k] = deployment.metadata.annotations[k]
+      elif ingress_url_parsed.scheme == 'http' and k in additional_ingress_annotations_http:
+        service.metadata.annotations[k] = additional_ingress_annotations_http[k]
+      elif ingress_url_parsed.scheme == 'https' and k in additional_ingress_annotations_https:
+        service.metadata.annotations[k] = additional_ingress_annotations_https[k]
+      else:
+        service.metadata.annotations[k] = None
   # ensure port is up to date
   port = one_or_none(
     port.container_port
@@ -100,11 +121,11 @@ def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
   if service_create_required:
     if not dry_run:
       core_v1.create_namespaced_service(service.metadata.namespace, service)
-    click.echo(f"created service/{service.metadata.name} -n {service.metadata.namespace}")
+    click.echo(f"[deploy/{deployment.metadata.name} -n {deployment.metadata.namespace}]: created service/{service.metadata.name}")
   elif service_update_required:
     if not dry_run:
       core_v1.patch_namespaced_service(service.metadata.name, service.metadata.namespace, service)
-    click.echo(f"patched service/{service.metadata.name} -n {service.metadata.namespace}")
+    click.echo(f"[deploy/{deployment.metadata.name} -n {deployment.metadata.namespace}]: patched service/{service.metadata.name}")
   return service
 
 def delete_managed_service(*, deployment: client.V1Deployment, core_v1: client.CoreV1Api, annotation_key: str, dry_run: bool):
@@ -116,21 +137,21 @@ def delete_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
     return
   #
   if annotation_key not in service.metadata.annotations:
-    click.echo(f"ignoring un-managed service/{service.metadata.name} -n {service.metadata.namespace}")
+    click.echo(f"[deploy/{deployment.metadata.name} -n {deployment.metadata.namespace}]: ignoring un-managed service/{service.metadata.name} -n {service.metadata.namespace}")
     return
   #
   try:
     if not dry_run:
       core_v1.delete_namespaced_service(service.metadata.name, service.metadata.namespace)
-    click.echo(f"deleted service/{service.metadata.name} -n {service.metadata.namespace}")
+    click.echo(f"[deploy/{deployment.metadata.name} -n {deployment.metadata.namespace}]: deleted service/{service.metadata.name} -n {service.metadata.namespace}")
   except ApiException as e:
     if e.status != 404:
       raise e
 
-def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Service, networking_v1: client.NetworkingV1Api, annotation_key: str, ingress_url: str, ingress_url_parsed: urllib.parse.ParseResult, ingress_class_name: str, ingress_create_tls: bool, additional_ingress_annotations_http: dict, additional_ingress_annotations_https: dict, dry_run: bool):
+def upsert_managed_ingress(service: client.V1Service, networking_v1: client.NetworkingV1Api, annotation_key: str, ingress_url: str, ingress_url_parsed: urllib.parse.ParseResult, ingress_class_name: str, ingress_create_tls: bool, additional_ingress_annotations_http: dict, additional_ingress_annotations_https: dict, dry_run: bool):
   ingress_update_required = False
   try:
-    ingress = networking_v1.read_namespaced_ingress(deployment.metadata.name, deployment.metadata.namespace)
+    ingress = networking_v1.read_namespaced_ingress(service.metadata.name, service.metadata.namespace)
     ingress_create_required = False
   except ApiException as e:
     if e.status != 404:
@@ -140,8 +161,8 @@ def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Se
       api_version='networking.k8s.io/v1',
       kind='Ingress',
       metadata=client.V1ObjectMeta(
-        name=deployment.metadata.name,
-        namespace=deployment.metadata.namespace,
+        name=service.metadata.name,
+        namespace=service.metadata.namespace,
         annotations={annotation_key: ''},
       ),
       spec=client.V1IngressSpec(
@@ -169,7 +190,7 @@ def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Se
       ),
     )
   if annotation_key not in ingress.metadata.annotations or not ingress.metadata.annotations[annotation_key].endswith(ingress.spec.rules[0].http.paths[0].path or ''):
-    click.echo(f"found un-managed ingress/{ingress.metadata.name} -n {ingress.metadata.namespace}")
+    click.echo(f"[svc/{service.metadata.name} -n {service.metadata.namespace}]: found un-managed ingress/{ingress.metadata.name}")
     return ingress
   # update ingress_url if it changed
   if ingress.metadata.annotations[annotation_key] != ingress_url:
@@ -206,19 +227,19 @@ def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Se
       else:
         ingress.spec.tls = None
   # any ingress-related annotations in the deployment not reflected in the ingress?
-  deployment_nginx_annotations = {
-    (k, v) for k, v in deployment.metadata.annotations.items()
+  service_nginx_annotations = {
+    (k, v) for k, v in service.metadata.annotations.items()
     if k.startswith('nginx.ingress.kubernetes.io/') or k.startswith('traefik.ingress.kubernetes.io/')
   }
   ingress_nginx_annotations = {
     (k, v) for k, v in ingress.metadata.annotations.items()
     if k.startswith('nginx.ingress.kubernetes.io/') or k.startswith('traefik.ingress.kubernetes.io/')
   }
-  if deployment_nginx_annotations ^ ingress_nginx_annotations:
+  if service_nginx_annotations ^ ingress_nginx_annotations:
     ingress_update_required = True
-    for k in {k for k, _ in deployment_nginx_annotations ^ ingress_nginx_annotations}:
-      if k in deployment.metadata.annotations:
-        ingress.metadata.annotations[k] = deployment.metadata.annotations[k]
+    for k in {k for k, _ in service_nginx_annotations ^ ingress_nginx_annotations}:
+      if k in service.metadata.annotations:
+        ingress.metadata.annotations[k] = service.metadata.annotations[k]
       elif ingress_url_parsed.scheme == 'http' and k in additional_ingress_annotations_http:
         ingress.metadata.annotations[k] = additional_ingress_annotations_http[k]
       elif ingress_url_parsed.scheme == 'https' and k in additional_ingress_annotations_https:
@@ -247,33 +268,148 @@ def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Se
   # apply changes as required
   if ingress_create_required:
     if not dry_run:
-      networking_v1.create_namespaced_ingress(deployment.metadata.namespace, ingress)
-    click.echo(f"created ingress/{ingress.metadata.name} -n {ingress.metadata.namespace}")
+      networking_v1.create_namespaced_ingress(service.metadata.namespace, ingress)
+    click.echo(f"[svc/{service.metadata.name} -n {service.metadata.namespace}]: created ingress/{ingress.metadata.name}")
   elif ingress_update_required:
     if not dry_run:
-      networking_v1.patch_namespaced_ingress(deployment.metadata.name, deployment.metadata.namespace, ingress)
-    click.echo(f"patched ingress/{ingress.metadata.name} -n {ingress.metadata.namespace}")
+      networking_v1.patch_namespaced_ingress(service.metadata.name, service.metadata.namespace, ingress)
+    click.echo(f"[svc/{service.metadata.name} -n {service.metadata.namespace}]: patched ingress/{ingress.metadata.name}")
   return ingress
 
-def delete_managed_ingress(*, deployment: client.V1Deployment, networking_v1: client.NetworkingV1Api, annotation_key: str, ingress_url: str, ingress_url_parsed: urllib.parse.ParseResult, dry_run: bool):
+def delete_managed_ingress(*, service: client.V1Service, networking_v1: client.NetworkingV1Api, annotation_key: str, dry_run: bool):
   try:
-    ingress = networking_v1.read_namespaced_ingress(deployment.metadata.name, deployment.metadata.namespace)
+    ingress = networking_v1.read_namespaced_ingress(service.metadata.name, service.metadata.namespace)
   except ApiException as e:
     if e.status != 404:
       raise e
     return
   #
   if annotation_key not in ingress.metadata.annotations or not ingress.metadata.annotations[annotation_key].endswith(ingress.spec.rules[0].http.paths[0].path or ''):
-    click.echo(f"ignoring un-managed ingress/{ingress.metadata.name} -n {ingress.metadata.namespace}")
+    click.echo(f"[svc/{service.metadata.name} -n {service.metadata.namespace}]: ignoring un-managed ingress/{ingress.metadata.name}")
     return
   #
   try:
     if not dry_run:
       networking_v1.delete_namespaced_ingress(ingress.metadata.name, ingress.metadata.namespace)
-    click.echo(f"deleted ingress/{ingress.metadata.name} -n {ingress.metadata.namespace}")
+    click.echo(f"[svc/{service.metadata.name} -n {service.metadata.namespace}]: deleted ingress/{ingress.metadata.name}")
   except ApiException as e:
     if e.status != 404:
       raise e
+
+def auto_service_for_deployment(*, kube_config: str, namespace: str, annotation_key: str, additional_ingress_annotations_http: dict, additional_ingress_annotations_https: dict, dry_run: bool):
+  click.echo('[deploy->svc]: loading config...')
+  if kube_config:
+    config.load_kube_config()
+  else:
+    try:
+      config.load_incluster_config()
+    except:
+      config.load_kube_config()
+
+  core_v1 = client.CoreV1Api()
+  apps_v1 = client.AppsV1Api()
+
+  click.echo('[deploy->svc]: starting...')
+  if namespace == '*':
+    event_stream = endless_watch(apps_v1.list_deployment_for_all_namespaces)
+  else:
+    event_stream = endless_watch(apps_v1.list_namespaced_deployment, namespace)
+  #
+  for event in event_stream:
+    event_type = event['type']
+    deployment = event['object']
+    try:
+      try:
+        ingress_url = one(filter(None, {
+          deployment.metadata.annotations and deployment.metadata.annotations.get(annotation_key),
+          deployment.spec.template.metadata.annotations and deployment.spec.template.metadata.annotations.get(annotation_key),
+        }))
+      except StopIteration:
+        continue
+      if deployment.spec.template.metadata.annotations and deployment.spec.template.metadata.annotations.get(annotation_key):
+        click.echo(f"[deploy/{deployment.metadata.name}->svc/{deployment.metadata.name} -n {deployment.metadata.namespace}]: WARNING using legacy annotation in pod template")
+      #
+      ingress_url_parsed = urllib.parse.urlparse(ingress_url)
+      #
+      if event_type in {'ADDED', 'MODIFIED'} and deployment.spec.replicas >= 1:
+        upsert_managed_service(
+          deployment=deployment,
+          ingress_url_parsed=ingress_url_parsed,
+          additional_ingress_annotations_http=additional_ingress_annotations_http,
+          additional_ingress_annotations_https=additional_ingress_annotations_https,
+          core_v1=core_v1,
+          annotation_key=annotation_key,
+          ingress_url=ingress_url,
+          dry_run=dry_run,
+        )
+      elif event_type == 'DELETED' or deployment.spec.replicas < 1:
+        delete_managed_service(
+          deployment=deployment,
+          core_v1=core_v1,
+          annotation_key=annotation_key,
+          dry_run=dry_run,
+        )
+      else:
+        click.echo(f"[deploy/{deployment.metadata.name}->svc/{deployment.metadata.name} -n {deployment.metadata.namespace}]: ignored {event_type} {deployment.spec.replicas}")
+    except:
+      click.echo(f"[deploy/{deployment.metadata.name}->svc/{deployment.metadata.name} -n {deployment.metadata.namespace}]: error processing {event_type}\n{traceback.format_exc()}")
+
+def auto_ingress_for_service(*, kube_config: str, namespace: str, annotation_key: str, ingress_class_name: str, ingress_create_tls: bool, additional_ingress_annotations_http: dict, additional_ingress_annotations_https: dict, dry_run: bool):
+  click.echo('[svc->ingress]: loading config...')
+  if kube_config:
+    config.load_kube_config()
+  else:
+    try:
+      config.load_incluster_config()
+    except:
+      config.load_kube_config()
+
+  core_v1 = client.CoreV1Api()
+  networking_v1 = client.NetworkingV1Api()
+
+  click.echo('[svc->ingress]: starting...')
+  if namespace == '*':
+    event_stream = endless_watch(core_v1.list_service_for_all_namespaces)
+  else:
+    event_stream = endless_watch(core_v1.list_namespaced_service, namespace)
+  #
+  for event in event_stream:
+    event_type = event['type']
+    service = event['object']
+    try:
+      try:
+        ingress_url = one(filter(None, {
+          service.metadata.annotations and service.metadata.annotations.get(annotation_key),
+        }))
+      except StopIteration:
+        continue
+      #
+      ingress_url_parsed = urllib.parse.urlparse(ingress_url)
+      #
+      if event_type in {'ADDED', 'MODIFIED'}:
+        upsert_managed_ingress(
+          service=service,
+          networking_v1=networking_v1,
+          annotation_key=annotation_key,
+          ingress_url=ingress_url,
+          ingress_url_parsed=ingress_url_parsed,
+          ingress_class_name=ingress_class_name,
+          ingress_create_tls=ingress_create_tls,
+          additional_ingress_annotations_http=additional_ingress_annotations_http,
+          additional_ingress_annotations_https=additional_ingress_annotations_https,
+          dry_run=dry_run,
+        )
+      elif event_type == 'DELETED':
+        delete_managed_ingress(
+          service=service,
+          networking_v1=networking_v1,
+          annotation_key=annotation_key,
+          dry_run=dry_run,
+        )
+      else:
+        click.echo(f"[svc/{service.metadata.name}->ingress/{service.metadata.name} -n {service.metadata.namespace}]: ignored {event_type}")
+    except:
+      click.echo(f"[svc/{service.metadata.name}->ingress/{service.metadata.name} -n {service.metadata.namespace}]: error processing {event_type}\n{traceback.format_exc()}")
 
 @click.command(
   help='Automatically watch and register ingresses'
@@ -342,82 +478,33 @@ def auto_ingress(
   kube_config,
   dry_run,
 ):
-  click.echo('Loading config...')
-  if kube_config:
-    config.load_kube_config()
-  else:
-    try:
-      config.load_incluster_config()
-    except:
-      config.load_kube_config()
-
   additional_ingress_annotations_http = json.loads(additional_ingress_annotations_http)
   additional_ingress_annotations_https = json.loads(additional_ingress_annotations_https)
-  core_v1 = client.CoreV1Api()
-  apps_v1 = client.AppsV1Api()
-  networking_v1 = client.NetworkingV1Api()
 
   click.echo('Starting..')
-  if namespace == '*':
-    event_stream = endless_watch(apps_v1.list_deployment_for_all_namespaces)
-  else:
-    event_stream = endless_watch(apps_v1.list_namespaced_deployment, namespace)
-  #
-  for event in event_stream:
-    event_type = event['type']
-    deployment = event['object']
-    try:
-      try:
-        ingress_url = one(filter(None, {
-          deployment.metadata.annotations and deployment.metadata.annotations.get(annotation_key),
-          deployment.spec.template.metadata.annotations and deployment.spec.template.metadata.annotations.get(annotation_key),
-        }))
-      except StopIteration:
-        continue
-      if deployment.spec.template.metadata.annotations and deployment.spec.template.metadata.annotations.get(annotation_key):
-        click.echo(f"WARNING {deployment.metadata.namespace}/{deployment.metadata.name} using legacy annotation in pod template")
-      ingress_url_parsed = urllib.parse.urlparse(ingress_url)
-      #
-      if event_type in {'ADDED', 'MODIFIED'} and deployment.spec.replicas >= 1:
-        service = upsert_managed_service(
-          deployment=deployment,
-          core_v1=core_v1,
-          annotation_key=annotation_key,
-          ingress_url=ingress_url,
-          dry_run=dry_run,
-        )
-        upsert_managed_ingress(
-          deployment=deployment,
-          service=service,
-          networking_v1=networking_v1,
-          annotation_key=annotation_key,
-          ingress_url=ingress_url,
-          ingress_url_parsed=ingress_url_parsed,
-          ingress_class_name=ingress_class_name,
-          ingress_create_tls=ingress_create_tls,
-          additional_ingress_annotations_http=additional_ingress_annotations_http,
-          additional_ingress_annotations_https=additional_ingress_annotations_https,
-          dry_run=dry_run,
-        )
-      elif event_type == 'DELETED' or deployment.spec.replicas < 1:
-        delete_managed_ingress(
-          deployment=deployment,
-          networking_v1=networking_v1,
-          annotation_key=annotation_key,
-          ingress_url=ingress_url,
-          ingress_url_parsed=ingress_url_parsed,
-          dry_run=dry_run,
-        )
-        delete_managed_service(
-          deployment=deployment,
-          core_v1=core_v1,
-          annotation_key=annotation_key,
-          dry_run=dry_run,
-        )
-      else:
-        click.echo(f"Ignored {event_type} {deployment.spec.replicas}")
-    except:
-      click.echo(f"error processing {event_type} {deployment.metadata.namespace}/{deployment.metadata.name}\n{traceback.format_exc()}")
+  with futures.ThreadPoolExecutor(max_workers=2) as executor:
+    for fut in futures.as_completed({
+      executor.submit(
+        auto_service_for_deployment,
+        kube_config=kube_config,
+        namespace=namespace,
+        annotation_key=annotation_key,
+        additional_ingress_annotations_http=additional_ingress_annotations_http,
+        additional_ingress_annotations_https=additional_ingress_annotations_https,
+        dry_run=dry_run,
+      ),
+      executor.submit(
+        auto_ingress_for_service,
+        kube_config=kube_config,
+        namespace=namespace,
+        annotation_key=annotation_key,
+        ingress_class_name=ingress_class_name,
+        ingress_create_tls=ingress_create_tls,
+        additional_ingress_annotations_http=additional_ingress_annotations_http,
+        additional_ingress_annotations_https=additional_ingress_annotations_https,
+        dry_run=dry_run,
+      ),
+    }): fut.result()
 
 if __name__ == '__main__':
   auto_ingress()
