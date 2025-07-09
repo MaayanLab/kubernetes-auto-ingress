@@ -219,6 +219,10 @@ def upsert_managed_ingress(deployment: client.V1Deployment, service: client.V1Se
     for k in {k for k, _ in deployment_nginx_annotations ^ ingress_nginx_annotations}:
       if k in deployment.metadata.annotations:
         ingress.metadata.annotations[k] = deployment.metadata.annotations[k]
+      elif ingress_url_parsed.scheme == 'http' and k in additional_ingress_annotations_http:
+        ingress.metadata.annotations[k] = additional_ingress_annotations_http[k]
+      elif ingress_url_parsed.scheme == 'https' and k in additional_ingress_annotations_https:
+        ingress.metadata.annotations[k] = additional_ingress_annotations_https[k]
       else:
         ingress.metadata.annotations[k] = None
   # add server-aliases to tls hosts (will only result in a change if annotations changed or ingress_url changed)
