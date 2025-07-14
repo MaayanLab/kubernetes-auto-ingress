@@ -197,6 +197,8 @@ def upsert_managed_ingress(service: client.V1Service, networking_v1: client.Netw
     ingress_update_required = True
     # update the annotation so we know we're in sync
     ingress.metadata.annotations[annotation_key] = ingress_url
+    # update the hostname
+    ingress.spec.rules[0].host = ingress_url_parsed.hostname
     # update the actual path
     ingress.spec.rules[0].http.paths[0].path = ingress_url_parsed.path
     # update the scheme
