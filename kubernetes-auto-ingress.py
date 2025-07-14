@@ -252,8 +252,7 @@ def upsert_managed_ingress(service: client.V1Service, networking_v1: client.Netw
   if ingress.spec.tls and ingress.metadata.annotations.get('nginx.ingress.kubernetes.io/server-alias'):
     # we add the unique comma separated aliases except the potentially duplicated primary hostname which is already there
     server_aliases = set(ingress.metadata.annotations['nginx.ingress.kubernetes.io/server-alias'].split(',')) - {ingress_url_parsed.hostname}
-    if ingress_create_tls:
-      ingress.spec.tls[0].hosts += list(server_aliases)
+    ingress.spec.tls[0].hosts += list(server_aliases)
   # ensure port is up to date
   port = one_or_none(
     service_port.port
