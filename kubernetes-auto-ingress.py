@@ -73,7 +73,7 @@ def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
       ),
     )
   if annotation_key not in service.metadata.annotations:
-    click.echo(f"[deploy/{deployment.metadata.name} -n {deployment.metadata.namespace}]: found un-managed service/{service.metadata.name}")
+    click.echo(f"[deploy/{deployment.metadata.name} -n {deployment.metadata.namespace}]: found un-managed svc/{service.metadata.name}")
     return service
   # update ingress_url if it changed
   if service.metadata.annotations[annotation_key] != ingress_url:
@@ -121,11 +121,11 @@ def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
   if service_create_required:
     if not dry_run:
       core_v1.create_namespaced_service(service.metadata.namespace, service)
-    click.echo(f"[deploy/{deployment.metadata.name} -n {deployment.metadata.namespace}]: created service/{service.metadata.name}")
+    click.echo(f"[deploy/{deployment.metadata.name} -n {deployment.metadata.namespace}]: created svc/{service.metadata.name}")
   elif service_update_required:
     if not dry_run:
       core_v1.patch_namespaced_service(service.metadata.name, service.metadata.namespace, service)
-    click.echo(f"[deploy/{deployment.metadata.name} -n {deployment.metadata.namespace}]: patched service/{service.metadata.name}")
+    click.echo(f"[deploy/{deployment.metadata.name} -n {deployment.metadata.namespace}]: patched svc/{service.metadata.name}")
   return service
 
 def delete_managed_service(*, deployment: client.V1Deployment, core_v1: client.CoreV1Api, annotation_key: str, dry_run: bool):
@@ -137,13 +137,13 @@ def delete_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
     return
   #
   if annotation_key not in service.metadata.annotations:
-    click.echo(f"[deploy/{deployment.metadata.name} -n {deployment.metadata.namespace}]: ignoring un-managed service/{service.metadata.name} -n {service.metadata.namespace}")
+    click.echo(f"[deploy/{deployment.metadata.name} -n {deployment.metadata.namespace}]: ignoring un-managed svc/{service.metadata.name} -n {service.metadata.namespace}")
     return
   #
   try:
     if not dry_run:
       core_v1.delete_namespaced_service(service.metadata.name, service.metadata.namespace)
-    click.echo(f"[deploy/{deployment.metadata.name} -n {deployment.metadata.namespace}]: deleted service/{service.metadata.name} -n {service.metadata.namespace}")
+    click.echo(f"[deploy/{deployment.metadata.name} -n {deployment.metadata.namespace}]: deleted svc/{service.metadata.name} -n {service.metadata.namespace}")
   except ApiException as e:
     if e.status != 404:
       raise e
