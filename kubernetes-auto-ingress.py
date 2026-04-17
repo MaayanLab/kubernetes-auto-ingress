@@ -4,6 +4,7 @@ import json
 import click
 import urllib.parse
 import traceback
+import urllib3.exceptions
 from concurrent import futures
 from kubernetes import client, config, watch
 from kubernetes.client.exceptions import ApiException
@@ -31,15 +32,20 @@ def one_or_none(it):
 
 def endless_watch(*args):
   w = watch.Watch()
-  s = iter(w.stream(*args))
-  v = None
+  resource_version = None
   while True:
     try:
-      event = next(s)
-      v = event['object'].metadata.resource_version
-      yield event
-    except StopIteration:
-      s = iter(w.stream(*args, resource_version=v))
+      for event in w.stream(*args, resource_version=resource_version):
+        resource_version = event['object'].metadata.resource_version
+        yield event
+    except ApiException as err:
+      if err.status == 410:
+        resource_version = None
+      else:
+        raise
+    except KeyboardInterrupt: raise
+    except urllib3.exceptions.ProtocolError:
+      traceback.print_exc()
 
 def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.CoreV1Api, annotation_key: str, ingress_url: str, ingress_url_parsed: urllib.parse.ParseResult, additional_ingress_annotations_http: dict, additional_ingress_annotations_https: dict, dry_run: bool):
   service_update_required = False
