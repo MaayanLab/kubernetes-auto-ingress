@@ -489,8 +489,8 @@ def auto_ingress(
   additional_ingress_annotations_https = json.loads(additional_ingress_annotations_https)
 
   click.echo('Starting..')
-  with futures.ThreadPoolExecutor(max_workers=2) as executor:
-    for fut in futures.as_completed({
+  with futures.ProcessPoolExecutor(max_workers=2) as executor:
+    done, _not_done = futures.wait({
       executor.submit(
         auto_service_for_deployment,
         kube_config=kube_config,
@@ -511,7 +511,9 @@ def auto_ingress(
         additional_ingress_annotations_https=additional_ingress_annotations_https,
         dry_run=dry_run,
       ),
-    }): fut.result()
+    }, return_when='FIRST_EXCEPTION')
+    executor.kill_workers()
+    raise ExceptionGroup('Process exited prematurely', [f.exception() for f in done])
 
 if __name__ == '__main__':
   auto_ingress()
