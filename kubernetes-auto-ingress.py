@@ -85,14 +85,23 @@ def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
   if service.metadata.annotations[annotation_key] != ingress_url:
     service_update_required = True
     service.metadata.annotations[annotation_key] = ingress_url
+    service.metadata.annotations['external-dns.alpha.kubernetes.io/hostname'] = ingress_url_parsed.hostname
   # any ingress-related annotations in the deployment not reflected in the service?
   deployment_nginx_annotations = {
     (k, v) for k, v in deployment.metadata.annotations.items()
-    if k.startswith('nginx.ingress.kubernetes.io/') or k.startswith('traefik.ingress.kubernetes.io/')
+    if (
+      k.startswith('nginx.ingress.kubernetes.io/')
+      or k.startswith('traefik.ingress.kubernetes.io/')
+      or k.startswith('external-dns.alpha.kubernetes.io/')
+    )
   }
   service_nginx_annotations = {
     (k, v) for k, v in service.metadata.annotations.items()
-    if k.startswith('nginx.ingress.kubernetes.io/') or k.startswith('traefik.ingress.kubernetes.io/')
+    if (
+      k.startswith('nginx.ingress.kubernetes.io/')
+      or k.startswith('traefik.ingress.kubernetes.io/')
+      or k.startswith('external-dns.alpha.kubernetes.io/')
+    )
   }
   if deployment_nginx_annotations ^ service_nginx_annotations:
     service_update_required = True
@@ -204,6 +213,7 @@ def upsert_managed_ingress(service: client.V1Service, networking_v1: client.Netw
     # update the annotation so we know we're in sync
     ingress.metadata.annotations[annotation_key] = ingress_url
     # update the hostname
+    ingress.metadata.annotations['external-dns.alpha.kubernetes.io/hostname'] = ingress_url_parsed.hostname
     ingress.spec.rules[0].host = ingress_url_parsed.hostname
     # update the actual path
     ingress.spec.rules[0].http.paths[0].path = ingress_url_parsed.path
@@ -237,11 +247,19 @@ def upsert_managed_ingress(service: client.V1Service, networking_v1: client.Netw
   # any ingress-related annotations in the deployment not reflected in the ingress?
   service_nginx_annotations = {
     (k, v) for k, v in service.metadata.annotations.items()
-    if k.startswith('nginx.ingress.kubernetes.io/') or k.startswith('traefik.ingress.kubernetes.io/')
+    if (
+      k.startswith('nginx.ingress.kubernetes.io/')
+      or k.startswith('traefik.ingress.kubernetes.io/')
+      or k.startswith('external-dns.alpha.kubernetes.io/')
+    )
   }
   ingress_nginx_annotations = {
     (k, v) for k, v in ingress.metadata.annotations.items()
-    if k.startswith('nginx.ingress.kubernetes.io/') or k.startswith('traefik.ingress.kubernetes.io/')
+    if (
+      k.startswith('nginx.ingress.kubernetes.io/')
+      or k.startswith('traefik.ingress.kubernetes.io/')
+      or k.startswith('external-dns.alpha.kubernetes.io/')
+    )
   }
   if service_nginx_annotations ^ ingress_nginx_annotations:
     ingress_update_required = True
