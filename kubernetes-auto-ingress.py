@@ -87,7 +87,7 @@ def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
     service.metadata.annotations[annotation_key] = ingress_url
     service.metadata.annotations['external-dns.alpha.kubernetes.io/hostname'] = ingress_url_parsed.hostname
   # any ingress-related annotations in the deployment not reflected in the service?
-  deployment_nginx_annotations = {
+  deployment_passthrough_annotations = {
     (k, v) for k, v in deployment.metadata.annotations.items()
     if (
       k.startswith('nginx.ingress.kubernetes.io/')
@@ -95,7 +95,7 @@ def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
       or k.startswith('external-dns.alpha.kubernetes.io/')
     )
   }
-  service_nginx_annotations = {
+  service_passthrough_annotations = {
     (k, v) for k, v in service.metadata.annotations.items()
     if (
       k.startswith('nginx.ingress.kubernetes.io/')
@@ -103,9 +103,9 @@ def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
       or k.startswith('external-dns.alpha.kubernetes.io/')
     )
   }
-  if deployment_nginx_annotations ^ service_nginx_annotations:
+  if deployment_passthrough_annotations ^ service_passthrough_annotations:
     service_update_required = True
-    for k in {k for k, _ in deployment_nginx_annotations ^ service_nginx_annotations}:
+    for k in {k for k, _ in deployment_passthrough_annotations ^ service_passthrough_annotations}:
       if k in deployment.metadata.annotations:
         service.metadata.annotations[k] = deployment.metadata.annotations[k]
       elif ingress_url_parsed.scheme == 'http' and k in additional_ingress_annotations_http:
@@ -245,7 +245,7 @@ def upsert_managed_ingress(service: client.V1Service, networking_v1: client.Netw
       else:
         ingress.spec.tls = None
   # any ingress-related annotations in the deployment not reflected in the ingress?
-  service_nginx_annotations = {
+  service_passthrough_annotations = {
     (k, v) for k, v in service.metadata.annotations.items()
     if (
       k.startswith('nginx.ingress.kubernetes.io/')
@@ -253,7 +253,7 @@ def upsert_managed_ingress(service: client.V1Service, networking_v1: client.Netw
       or k.startswith('external-dns.alpha.kubernetes.io/')
     )
   }
-  ingress_nginx_annotations = {
+  ingress_passthrough_annotations = {
     (k, v) for k, v in ingress.metadata.annotations.items()
     if (
       k.startswith('nginx.ingress.kubernetes.io/')
@@ -261,9 +261,9 @@ def upsert_managed_ingress(service: client.V1Service, networking_v1: client.Netw
       or k.startswith('external-dns.alpha.kubernetes.io/')
     )
   }
-  if service_nginx_annotations ^ ingress_nginx_annotations:
+  if service_passthrough_annotations ^ ingress_passthrough_annotations:
     ingress_update_required = True
-    for k in {k for k, _ in service_nginx_annotations ^ ingress_nginx_annotations}:
+    for k in {k for k, _ in service_passthrough_annotations ^ ingress_passthrough_annotations}:
       if k in service.metadata.annotations:
         ingress.metadata.annotations[k] = service.metadata.annotations[k]
       elif ingress_url_parsed.scheme == 'http' and k in additional_ingress_annotations_http:
