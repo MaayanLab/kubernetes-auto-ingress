@@ -1,5 +1,5 @@
 services:
   app:
-    image: maayanlab/kubernetes-auto-ingress:v2.2.0
+    image: maayanlab/kubernetes-auto-ingress:v2.2.1
     build: .
     platform: linux/amd64

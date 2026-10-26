@@ -166,7 +166,7 @@ def delete_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
 def upsert_managed_ingress(service: client.V1Service, networking_v1: client.NetworkingV1Api, annotation_key: str, ingress_url: str, ingress_url_parsed: urllib.parse.ParseResult, ingress_name: str, ingress_class_name: str, ingress_create_tls: bool, additional_ingress_annotations_http: dict, additional_ingress_annotations_https: dict, dry_run: bool):
   ingress_update_required = False
   try:
-    ingress = networking_v1.read_namespaced_ingress(service.metadata.name, service.metadata.namespace)
+    ingress = networking_v1.read_namespaced_ingress(ingress_name, service.metadata.namespace)
     ingress_create_required = False
   except ApiException as e:
     if e.status != 404:
@@ -438,9 +438,9 @@ def auto_ingress_for_service(*, kube_config: str, namespace: str, annotation_key
           dry_run=dry_run,
         )
       else:
-        click.echo(f"[svc/{service.metadata.name}->ingress/{service.metadata.name} -n {service.metadata.namespace}]: ignored {event_type}")
+        click.echo(f"[svc/{service.metadata.name}->ingress/{ingress_name} -n {service.metadata.namespace}]: ignored {event_type}")
     except:
-      click.echo(f"[svc/{service.metadata.name}->ingress/{service.metadata.name} -n {service.metadata.namespace}]: error processing {event_type}\n{traceback.format_exc()}")
+      click.echo(f"[svc/{service.metadata.name}->ingress/{ingress_name} -n {service.metadata.namespace}]: error processing {event_type}\n{traceback.format_exc()}")
 
 @click.command(
   help='Automatically watch and register ingresses'
