@@ -47,10 +47,10 @@ def endless_watch(*args):
     except urllib3.exceptions.ProtocolError:
       traceback.print_exc()
 
-def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.CoreV1Api, annotation_key: str, ingress_url: str, ingress_url_parsed: urllib.parse.ParseResult, additional_ingress_annotations_http: dict, additional_ingress_annotations_https: dict, dry_run: bool):
+def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.CoreV1Api, service_name: str, annotation_key: str, ingress_url: str, ingress_url_parsed: urllib.parse.ParseResult, additional_ingress_annotations_http: dict, additional_ingress_annotations_https: dict, dry_run: bool):
   service_update_required = False
   try:
-    service = core_v1.read_namespaced_service(deployment.metadata.name, deployment.metadata.namespace)
+    service = core_v1.read_namespaced_service(service_name, deployment.metadata.namespace)
     service_create_required = False
   except ApiException as e:
     if e.status != 404:
@@ -61,7 +61,7 @@ def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
       api_version='v1',
       kind='Service',
       metadata=client.V1ObjectMeta(
-        name=deployment.metadata.name,
+        name=service_name,
         namespace=deployment.metadata.namespace,
         annotations={annotation_key: ''}
       ),
@@ -143,9 +143,9 @@ def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
     click.echo(f"[deploy/{deployment.metadata.name} -n {deployment.metadata.namespace}]: patched svc/{service.metadata.name}")
   return service
 
-def delete_managed_service(*, deployment: client.V1Deployment, core_v1: client.CoreV1Api, annotation_key: str, dry_run: bool):
+def delete_managed_service(*, deployment: client.V1Deployment, core_v1: client.CoreV1Api, service_name: str, annotation_key: str, dry_run: bool):
   try:
-    service = core_v1.read_namespaced_service(deployment.metadata.name, deployment.metadata.namespace)
+    service = core_v1.read_namespaced_service(service_name, deployment.metadata.namespace)
   except ApiException as e:
     if e.status != 404:
       raise e
@@ -163,7 +163,7 @@ def delete_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
     if e.status != 404:
       raise e
 
-def upsert_managed_ingress(service: client.V1Service, networking_v1: client.NetworkingV1Api, annotation_key: str, ingress_url: str, ingress_url_parsed: urllib.parse.ParseResult, ingress_class_name: str, ingress_create_tls: bool, additional_ingress_annotations_http: dict, additional_ingress_annotations_https: dict, dry_run: bool):
+def upsert_managed_ingress(service: client.V1Service, networking_v1: client.NetworkingV1Api, annotation_key: str, ingress_url: str, ingress_url_parsed: urllib.parse.ParseResult, ingress_name: str, ingress_class_name: str, ingress_create_tls: bool, additional_ingress_annotations_http: dict, additional_ingress_annotations_https: dict, dry_run: bool):
   ingress_update_required = False
   try:
     ingress = networking_v1.read_namespaced_ingress(service.metadata.name, service.metadata.namespace)
@@ -176,7 +176,7 @@ def upsert_managed_ingress(service: client.V1Service, networking_v1: client.Netw
       api_version='networking.k8s.io/v1',
       kind='Ingress',
       metadata=client.V1ObjectMeta(
-        name=service.metadata.name,
+        name=ingress_name,
         namespace=service.metadata.namespace,
         annotations={annotation_key: ''},
       ),
@@ -301,9 +301,9 @@ def upsert_managed_ingress(service: client.V1Service, networking_v1: client.Netw
     click.echo(f"[svc/{service.metadata.name} -n {service.metadata.namespace}]: patched ingress/{ingress.metadata.name}")
   return ingress
 
-def delete_managed_ingress(*, service: client.V1Service, networking_v1: client.NetworkingV1Api, annotation_key: str, dry_run: bool):
+def delete_managed_ingress(*, service: client.V1Service, networking_v1: client.NetworkingV1Api, ingress_name: str, annotation_key: str, dry_run: bool):
   try:
-    ingress = networking_v1.read_namespaced_ingress(service.metadata.name, service.metadata.namespace)
+    ingress = networking_v1.read_namespaced_ingress(ingress_name, service.metadata.namespace)
   except ApiException as e:
     if e.status != 404:
       raise e
@@ -343,6 +343,7 @@ def auto_service_for_deployment(*, kube_config: str, namespace: str, annotation_
   for event in event_stream:
     event_type = event['type']
     deployment = event['object']
+    service_name = deployment.metadata.name
     try:
       try:
         ingress_url = one(filter(None, {
@@ -352,13 +353,14 @@ def auto_service_for_deployment(*, kube_config: str, namespace: str, annotation_
       except StopIteration:
         continue
       if deployment.spec.template.metadata.annotations and deployment.spec.template.metadata.annotations.get(annotation_key):
-        click.echo(f"[deploy/{deployment.metadata.name}->svc/{deployment.metadata.name} -n {deployment.metadata.namespace}]: WARNING using legacy annotation in pod template")
+        click.echo(f"[deploy/{deployment.metadata.name}->svc/{service_name} -n {deployment.metadata.namespace}]: WARNING using legacy annotation in pod template")
       #
       ingress_url_parsed = urllib.parse.urlparse(ingress_url)
       #
       if event_type in {'ADDED', 'MODIFIED'} and deployment.spec.replicas >= 1:
         upsert_managed_service(
           deployment=deployment,
+          service_name=service_name,
           ingress_url_parsed=ingress_url_parsed,
           additional_ingress_annotations_http=additional_ingress_annotations_http,
           additional_ingress_annotations_https=additional_ingress_annotations_https,
@@ -370,6 +372,7 @@ def auto_service_for_deployment(*, kube_config: str, namespace: str, annotation_
       elif event_type == 'DELETED' or deployment.spec.replicas < 1:
         delete_managed_service(
           deployment=deployment,
+          service_name=service_name,
           core_v1=core_v1,
           annotation_key=annotation_key,
           dry_run=dry_run,
@@ -410,6 +413,7 @@ def auto_ingress_for_service(*, kube_config: str, namespace: str, annotation_key
         continue
       #
       ingress_url_parsed = urllib.parse.urlparse(ingress_url)
+      ingress_name = f"{service.metadata.name}-{ingress_class_name}" if ingress_class_name else service.metadata.name
       #
       if event_type in {'ADDED', 'MODIFIED'}:
         upsert_managed_ingress(
@@ -418,6 +422,7 @@ def auto_ingress_for_service(*, kube_config: str, namespace: str, annotation_key
           annotation_key=annotation_key,
           ingress_url=ingress_url,
           ingress_url_parsed=ingress_url_parsed,
+          ingress_name=ingress_name,
           ingress_class_name=ingress_class_name,
           ingress_create_tls=ingress_create_tls,
           additional_ingress_annotations_http=additional_ingress_annotations_http,
@@ -426,6 +431,7 @@ def auto_ingress_for_service(*, kube_config: str, namespace: str, annotation_key
         )
       elif event_type == 'DELETED':
         delete_managed_ingress(
+          ingress_name=ingress_name,
           service=service,
           networking_v1=networking_v1,
           annotation_key=annotation_key,
