@@ -293,11 +293,11 @@ def upsert_managed_ingress(service: client.V1Service, networking_v1: client.Netw
   # apply changes as required
   if ingress_create_required:
     if not dry_run:
-      networking_v1.create_namespaced_ingress(service.metadata.namespace, ingress)
+      networking_v1.create_namespaced_ingress(ingress.metadata.namespace, ingress)
     click.echo(f"[svc/{service.metadata.name} -n {service.metadata.namespace}]: created ingress/{ingress.metadata.name}")
   elif ingress_update_required:
     if not dry_run:
-      networking_v1.patch_namespaced_ingress(service.metadata.name, service.metadata.namespace, ingress)
+      networking_v1.patch_namespaced_ingress(ingress.metadata.name, service.metadata.namespace, ingress)
     click.echo(f"[svc/{service.metadata.name} -n {service.metadata.namespace}]: patched ingress/{ingress.metadata.name}")
   return ingress
 
