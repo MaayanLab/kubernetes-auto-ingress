@@ -413,7 +413,8 @@ def auto_ingress_for_service(*, kube_config: str, namespace: str, annotation_key
         continue
       #
       ingress_url_parsed = urllib.parse.urlparse(ingress_url)
-      ingress_name = f"{service.metadata.name}-{ingress_class_name}" if ingress_class_name else service.metadata.name
+      ingress_name = service.metadata.name
+      # ingress_name = f"{service.metadata.name}-{ingress_class_name}" if ingress_class_name else service.metadata.name
       #
       if event_type in {'ADDED', 'MODIFIED'}:
         upsert_managed_ingress(
