@@ -85,7 +85,6 @@ def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
   if service.metadata.annotations[annotation_key] != ingress_url:
     service_update_required = True
     service.metadata.annotations[annotation_key] = ingress_url
-    service.metadata.annotations['external-dns.alpha.kubernetes.io/hostname'] = ingress_url_parsed.hostname
   # any ingress-related annotations in the deployment not reflected in the service?
   deployment_passthrough_annotations = {
     (k, v) for k, v in deployment.metadata.annotations.items()
@@ -114,6 +113,13 @@ def upsert_managed_service(*, deployment: client.V1Deployment, core_v1: client.C
         service.metadata.annotations[k] = additional_ingress_annotations_https[k]
       else:
         service.metadata.annotations[k] = None
+  # Reconcile controller-owned annotations after passthrough cleanup. Otherwise,
+  # the cleanup above treats a generated hostname as absent from the deployment
+  # and removes it in the same patch.
+  external_dns_hostname_key = 'external-dns.alpha.kubernetes.io/hostname'
+  if service.metadata.annotations.get(external_dns_hostname_key) != ingress_url_parsed.hostname:
+    service_update_required = True
+    service.metadata.annotations[external_dns_hostname_key] = ingress_url_parsed.hostname
   # ensure port is up to date
   port = one_or_none(
     port.container_port
@@ -213,7 +219,6 @@ def upsert_managed_ingress(service: client.V1Service, networking_v1: client.Netw
     # update the annotation so we know we're in sync
     ingress.metadata.annotations[annotation_key] = ingress_url
     # update the hostname
-    ingress.metadata.annotations['external-dns.alpha.kubernetes.io/hostname'] = ingress_url_parsed.hostname
     ingress.spec.rules[0].host = ingress_url_parsed.hostname
     # update the actual path
     ingress.spec.rules[0].http.paths[0].path = ingress_url_parsed.path
@@ -272,6 +277,12 @@ def upsert_managed_ingress(service: client.V1Service, networking_v1: client.Netw
         ingress.metadata.annotations[k] = additional_ingress_annotations_https[k]
       else:
         ingress.metadata.annotations[k] = None
+  # Reconcile controller-owned annotations after passthrough cleanup. This also
+  # repairs existing ingresses when their URL is already otherwise in sync.
+  external_dns_hostname_key = 'external-dns.alpha.kubernetes.io/hostname'
+  if ingress.metadata.annotations.get(external_dns_hostname_key) != ingress_url_parsed.hostname:
+    ingress_update_required = True
+    ingress.metadata.annotations[external_dns_hostname_key] = ingress_url_parsed.hostname
   # add server-aliases to tls hosts (will only result in a change if annotations changed or ingress_url changed)
   if ingress.spec.tls and ingress.metadata.annotations.get('nginx.ingress.kubernetes.io/server-alias'):
     # we add the unique comma separated aliases except the potentially duplicated primary hostname which is already there
